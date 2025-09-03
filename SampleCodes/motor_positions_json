@@ -1,0 +1,120 @@
+import os
+import time
+import json
+from dynamixel_sdk import *
+
+# Control table address for Present Position
+ADDR_PRESENT_POSITION = 132
+LEN_PRESENT_POSITION = 4
+ADDR_GOAL_POSITION = 116
+LEN_GOAL_POSITION = 4
+ADDR_TORQUE_ENABLE = 64
+
+# Protocol version
+PROTOCOL_VERSION = 2.0
+
+# Default setting
+BAUDRATE = 57600
+DEVICENAME = 'COM5'  # Be sure to change this to your Dynamixel device name!
+
+# IDs of your motors
+DXL_IDS = [1, 2, 3, 4]
+
+# Initialize PortHandler and PacketHandler
+portHandler = PortHandler(DEVICENAME)
+packetHandler = PacketHandler(PROTOCOL_VERSION)
+
+def main():
+    """
+    Main function to read motor positions and save to a JSON file.
+    """
+    
+    # Open port
+    try:
+        portHandler.openPort()
+    except Exception as e:
+        print(f"Failed to open the port: {e}")
+        return
+
+    # Set port baudrate
+    try:
+        portHandler.setBaudRate(BAUDRATE)
+    except Exception as e:
+        print(f"Failed to set the baudrate: {e}")
+        portHandler.closePort()
+        return
+
+    print("Port successfully opened and baudrate set.")
+    
+    try:
+        # Step 1: Set all motors to a 0-degree goal position
+        print("\nSetting all motors to 0-degree position...")
+        for dxl_id in DXL_IDS:
+            # A goal position of 0 corresponds to 0 degrees
+            goal_position = 0
+            dxl_comm_result, dxl_error = packetHandler.write4ByteTxRx(portHandler, dxl_id, ADDR_GOAL_POSITION, goal_position)
+            if dxl_comm_result != COMM_SUCCESS:
+                print(f"Failed to set goal position for motor ID {dxl_id}: {packetHandler.getTxRxResult(dxl_comm_result)}")
+            elif dxl_error != 0:
+                print(f"Error setting goal position for motor ID {dxl_id}: {packetHandler.getRxPacketError(dxl_error)}")
+        time.sleep(1) # Wait for motors to reach the position
+
+        # Step 2: Disable torque to make all joints free
+        print("Disabling torque on all motors...")
+        for dxl_id in DXL_IDS:
+            dxl_comm_result, dxl_error = packetHandler.write1ByteTxRx(portHandler, dxl_id, ADDR_TORQUE_ENABLE, 0)
+            if dxl_comm_result != COMM_SUCCESS:
+                print(f"Failed to disable torque for motor ID {dxl_id}: {packetHandler.getTxRxResult(dxl_comm_result)}")
+            elif dxl_error != 0:
+                print(f"Error disabling torque for motor ID {dxl_id}: {packetHandler.getRxPacketError(dxl_error)}")
+        time.sleep(1) # Give a moment for the torque to be disabled
+
+        # Step 3: Log all joint positions to JSON at 50Hz
+        print("\nLogging motor angles and printing to console. Press Ctrl+C to stop.")
+        
+        # Calculate the delay for a 50Hz frequency (1/50 = 0.02 seconds)
+        log_interval = 1.0 / 50.0
+
+        while True:
+            start_time = time.time()
+            motor_data = []
+            angles_to_print = []
+
+            for dxl_id in DXL_IDS:
+                dxl_present_position, dxl_comm_result, dxl_error = packetHandler.read4ByteTxRx(portHandler, dxl_id, ADDR_PRESENT_POSITION)
+                
+                if dxl_comm_result == COMM_SUCCESS and dxl_error == 0:
+                    angle_degrees = (dxl_present_position / 4096.0) * 360.0
+                    motor_info = {
+                        "motor_id": dxl_id,
+                        "raw_position": dxl_present_position,
+                        "angle_degrees": round(angle_degrees, 2)
+                    }
+                    motor_data.append(motor_info)
+                    angles_to_print.append(f"Motor {dxl_id}: {round(angle_degrees, 2)} deg")
+                # Note: Errors are printed but the loop continues to ensure continuous logging
+
+            # Write the data to the JSON file
+            output_file_name = "motor_positions.json"
+            with open(output_file_name, 'w') as json_file:
+                json.dump(motor_data, json_file, indent=4)
+            
+            # Print the joint angles to the console in a single, updating line
+            print(" | ".join(angles_to_print), end='\r')
+
+            # Ensure a consistent logging frequency
+            elapsed_time = time.time() - start_time
+            if elapsed_time < log_interval:
+                time.sleep(log_interval - elapsed_time)
+
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user. Closing port.")
+    except Exception as e:
+        print(f"\nAn error occurred: {e}")
+    finally:
+        # Close the port regardless of success or failure
+        portHandler.closePort()
+        print("Port closed.")
+
+if __name__ == "__main__":
+    main()
