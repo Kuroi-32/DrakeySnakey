@@ -19,7 +19,12 @@ DEVICENAME = 'COM5'  # Remember to change this!
 # IDs of your motors
 DXL_IDS = [1, 2, 3, 4]
 
-# Center positions in Dynamixel integer values
+# Set this flag to True to use 180 degrees (CENTER_POSITIONS) as the "zero" point
+# This will make the motors go to their center positions at the start
+# If False, the motors will use their raw 0 value as the starting point.
+USE_180_AS_ZERO = True
+
+# Center positions in Dynamixel integer values. These are now the effective "zero" points
 CENTER_POSITIONS = [2045, 1830, 1074, 2225]
 
 # Initialize PortHandler and PacketHandler
@@ -54,6 +59,12 @@ def disable_torque():
     for dxl_id in DXL_IDS:
         packetHandler.write1ByteTxRx(portHandler, dxl_id, ADDR_TORQUE_ENABLE, 0)
 
+# Set initial positions based on the USE_180_AS_ZERO flag
+if USE_180_AS_ZERO:
+    initial_positions = CENTER_POSITIONS
+else:
+    initial_positions = [0] * len(DXL_IDS)
+
 # Main loop for snake-like motion
 try:
     enable_torque()
@@ -71,7 +82,8 @@ try:
         current_time = time.time() - start_time
         
         for i, dxl_id in enumerate(DXL_IDS):
-            goal_pos = int(CENTER_POSITIONS[i] + amplitude * math.sin(2 * math.pi * frequency * current_time + i * phase_shift))
+            # The sine wave motion now oscillates around the initial_positions
+            goal_pos = int(initial_positions[i] + amplitude * math.sin(2 * math.pi * frequency * current_time + i * phase_shift))
             
             param_goal_position = [DXL_LOBYTE(DXL_LOWORD(goal_pos)), DXL_HIBYTE(DXL_LOWORD(goal_pos)), DXL_LOBYTE(DXL_HIWORD(goal_pos)), DXL_HIBYTE(DXL_HIWORD(goal_pos))]
             
@@ -90,11 +102,9 @@ except KeyboardInterrupt:
 finally:
     print("Resetting motors to home position and disabling torque.")
     
-    # Send all motors to their home position
+    # Send all motors to their home position, which is now the initial position
     for i, dxl_id in enumerate(DXL_IDS):
-        goal_pos = CENTER_POSITIONS[i]
-        
-        param_goal_position = [DXL_LOBYTE(DXL_LOWORD(goal_pos)), DXL_HIBYTE(DXL_LOWORD(goal_pos)), DXL_LOBYTE(DXL_HIWORD(goal_pos)), DXL_HIBYTE(DXL_HIWORD(goal_pos))]
+        goal_pos = initial_positions[i]
         
         packetHandler.write4ByteTxRx(portHandler, dxl_id, ADDR_GOAL_POSITION, goal_pos)
         time.sleep(0.1) # Small delay to allow each motor to receive the command
